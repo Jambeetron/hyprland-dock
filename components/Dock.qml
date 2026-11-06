@@ -17,6 +17,7 @@ PanelWindow {
   property int dragTarget: -1
   property int openMenuCount: 0
   property bool autoHideRevealed: false
+  property string activeInstanceDesktopId: ""
 
   readonly property int iconSize: settings.iconSize || 52
   readonly property real magnification: settings.magnification || 1.65
@@ -38,6 +39,49 @@ PanelWindow {
   readonly property bool vertical: position === "left" || position === "right"
   readonly property bool fullLength: settings.fullLength === undefined ? false : settings.fullLength
   readonly property var pinned: settings.pinned || []
+  readonly property var toplevels: ToplevelManager.toplevels.values || []
+  readonly property var applications: DesktopEntries.applications.values || []
+  readonly property var dockItems: {
+    var result = pinned.slice()
+    var appRevision = applications.length
+    var windowRevision = toplevels.length
+
+    function normalized(value) {
+      return String(value || "").toLowerCase().replace(/\.desktop$/, "")
+    }
+
+    for (var i = 0; i < toplevels.length; ++i) {
+      var windowAppId = normalized(toplevels[i].appId)
+      if (!windowAppId) continue
+
+      var desktopId = ""
+      for (var j = 0; j < applications.length; ++j) {
+        var application = applications[j]
+        if (normalized(application.id) === windowAppId
+            || normalized(application.startupClass) === windowAppId) {
+          desktopId = application.id
+          break
+        }
+      }
+      if (!desktopId) desktopId = windowAppId
+
+      var alreadyRepresented = false
+      for (var k = 0; k < pinned.length; ++k) {
+        var pinnedId = normalized(pinned[k])
+        var pinnedEntry = DesktopEntries.byId(pinned[k])
+        if (pinnedId === windowAppId
+            || pinnedId === normalized(desktopId)
+            || (pinnedEntry && normalized(pinnedEntry.startupClass) === windowAppId)) {
+          alreadyRepresented = true
+          break
+        }
+      }
+      if (!alreadyRepresented && result.indexOf(desktopId) < 0)
+        result.push(desktopId)
+    }
+
+    return result
+  }
   readonly property int itemSize: iconSize + 14
   readonly property int reservedSize: iconSize + 24 + edgeMargin
   readonly property int mainPadding: 10
@@ -189,11 +233,11 @@ PanelWindow {
 
       // Keep one spare cell so a settings reload cannot transiently reduce the
       // grid capacity before the repeater updates its delegates.
-      columns: root.vertical ? 1 : Math.max(1, root.pinned.length + 1)
-      rows: root.vertical ? Math.max(1, root.pinned.length + 1) : 1
+      columns: root.vertical ? 1 : Math.max(1, root.dockItems.length + 1)
+      rows: root.vertical ? Math.max(1, root.dockItems.length + 1) : 1
 
       Repeater {
-        model: root.pinned
+        model: root.dockItems
 
         DockItem {
           required property string modelData
@@ -201,6 +245,8 @@ PanelWindow {
 
           desktopId: modelData
           itemIndex: index
+          pinnedItem: root.pinned.indexOf(modelData) >= 0
+          instancePopupActive: root.activeInstanceDesktopId === modelData
           slotSize: root.itemSize
           iconSize: root.iconSize
           magnification: root.magnification
@@ -217,12 +263,72 @@ PanelWindow {
           }
           onDragMoved: mainPosition => root.updateDragTarget(mainPosition)
           onDragFinished: root.finishDrag()
+          onInstanceHoverEntered: desktopId => root.activeInstanceDesktopId = desktopId
+          onInstanceHoverLeft: desktopId => {
+            if (root.activeInstanceDesktopId === desktopId)
+              root.activeInstanceDesktopId = ""
+          }
           onAddApplicationRequested: appPicker.open()
-          onRemoveRequested: desktopId => root.unpinRequested(desktopId)
+          onRemoveRequested: desktopId => {
+            if (root.pinned.indexOf(desktopId) >= 0)
+              root.unpinRequested(desktopId)
+            else
+              root.pinRequested(desktopId)
+          }
           onAutoHideToggled: enabled => root.autoHideRequested(enabled)
           onContextMenuVisibilityChanged: visible => {
             root.openMenuCount = Math.max(0, root.openMenuCount + (visible ? 1 : -1))
           }
+        }
+      }
+
+      Item {
+        id: drawerButton
+        width: root.itemSize
+        height: root.itemSize
+
+        readonly property real distance: Math.abs(root.pointerPosition
+          - (root.vertical ? y + height / 2 : x + width / 2))
+        readonly property real influence: root.pointerPosition < -1000
+          ? 0
+          : Math.exp(-(distance * distance) / (root.magnificationRadius * root.magnificationRadius))
+        readonly property real iconScale: 1 + (root.magnification - 1) * influence
+
+        Rectangle {
+          id: drawerButtonVisual
+          anchors.centerIn: parent
+          anchors.verticalCenterOffset: root.position === "bottom" ? 7
+            : root.position === "top" ? -1 : 0
+          width: root.iconSize
+          height: root.iconSize
+          radius: 12
+          color: drawerHover.hovered ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+          scale: drawerButton.iconScale
+          transformOrigin: root.position === "top" ? Item.Top
+            : root.position === "left" ? Item.Left
+            : root.position === "right" ? Item.Right : Item.Bottom
+
+          Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+          Behavior on color { ColorAnimation { duration: 100 } }
+
+          Image {
+            anchors.centerIn: parent
+            width: parent.width * 0.78
+            height: parent.height * 0.78
+            source: Qt.resolvedUrl("app-grid.svg")
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+          }
+        }
+
+        HoverHandler {
+          id: drawerHover
+          cursorShape: Qt.PointingHandCursor
+        }
+
+        TapHandler {
+          acceptedButtons: Qt.LeftButton
+          onTapped: Quickshell.execDetached(["nwg-drawer"])
         }
       }
     }

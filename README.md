@@ -10,6 +10,9 @@ A lightweight macOS-inspired application dock for Hyprland, built with Quickshel
 - Freedesktop application icons and launching
 - Focuses an existing application on another workspace
 - Running-application indicators
+- Automatically shows running applications in the dock
+- Hover over an application to choose among its open windows
+- App-grid button opens `nwg-drawer`
 - Drag-to-reorder with persistent pinned-app order
 - Right-click actions to launch, close, pin, or unpin applications
 - Fuzzy application search for adding dock items
@@ -24,6 +27,7 @@ A lightweight macOS-inspired application dock for Hyprland, built with Quickshel
 - Hyprland
 - Quickshell 0.3 or newer
 - A working freedesktop icon theme
+- `nwg-drawer` for the app-grid launcher button
 
 ![Hyprland Dock running at the bottom of a Hyprland desktop](preview.png)
 

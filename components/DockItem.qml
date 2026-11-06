@@ -8,6 +8,8 @@ Item {
 
   required property string desktopId
   required property int itemIndex
+  required property bool pinnedItem
+  required property bool instancePopupActive
   required property int slotSize
   required property int iconSize
   required property real magnification
@@ -18,9 +20,12 @@ Item {
   required property string position
   required property bool vertical
   property real reorderOffset: 0
+  property bool instancePopupRequested: false
   signal dragStarted(int itemIndex)
   signal dragMoved(real mainPosition)
   signal dragFinished()
+  signal instanceHoverEntered(string desktopId)
+  signal instanceHoverLeft(string desktopId)
   signal addApplicationRequested()
   signal removeRequested(string desktopId)
   signal autoHideToggled(bool enabled)
@@ -37,6 +42,14 @@ Item {
   readonly property var runningToplevel: {
     var modelRevision = toplevels.length
     return findRunningToplevel()
+  }
+  readonly property var runningWindows: {
+    var modelRevision = toplevels.length
+    var matches = []
+    for (var i = 0; i < toplevels.length; ++i) {
+      if (matchesEntry(toplevels[i])) matches.push(toplevels[i])
+    }
+    return matches
   }
   readonly property real dragOffset: dragHandler.active
     ? vertical ? dragHandler.activeTranslation.y : dragHandler.activeTranslation.x
@@ -218,6 +231,119 @@ Item {
   HoverHandler {
     id: mouse
     cursorShape: Qt.PointingHandCursor
+    onHoveredChanged: {
+      if (hovered) {
+        popupCloseTimer.stop()
+        root.instancePopupRequested = root.runningWindows.length > 0
+        root.instanceHoverEntered(root.desktopId)
+      } else {
+        popupCloseTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: popupCloseTimer
+    interval: 250
+    onTriggered: {
+      if (!popupHover.hovered) {
+        root.instancePopupRequested = false
+        root.instanceHoverLeft(root.desktopId)
+      }
+    }
+  }
+
+  PopupWindow {
+    id: instancesPopup
+
+    visible: root.instancePopupRequested && root.instancePopupActive && root.runningWindows.length > 0
+    color: "transparent"
+    implicitWidth: 260
+    implicitHeight: Math.min(root.runningWindows.length, 8) * 38 + 12
+
+    anchor {
+      window: root.QsWindow ? root.QsWindow.window : null
+      adjustment: PopupAdjustment.Slide
+      edges: Edges.Top | Edges.Left
+      gravity: Edges.Top | Edges.Right
+
+      onAnchoring: {
+        if (!root.QsWindow || !instancesPopup.anchor.window) return
+        var x = (root.width - instancesPopup.implicitWidth) / 2
+        var y = root.height + 8
+        if (root.position === "bottom") y = -instancesPopup.implicitHeight - 8
+        else if (root.position === "left") {
+          x = root.width + 8
+          y = (root.height - instancesPopup.implicitHeight) / 2
+        } else if (root.position === "right") {
+          x = -instancesPopup.implicitWidth - 8
+          y = (root.height - instancesPopup.implicitHeight) / 2
+        }
+        var point = instancesPopup.anchor.window.contentItem.mapFromItem(root, x, y)
+        point.x = Math.max(8, Math.min(point.x, instancesPopup.anchor.window.width - instancesPopup.implicitWidth - 8))
+        point.y = Math.max(8, Math.min(point.y, instancesPopup.anchor.window.height - instancesPopup.implicitHeight - 8))
+        instancesPopup.anchor.rect.x = Math.round(point.x)
+        instancesPopup.anchor.rect.y = Math.round(point.y)
+      }
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      radius: 12
+      color: Qt.rgba(0.08, 0.09, 0.11, 0.97)
+      border.width: 1
+      border.color: Qt.rgba(1, 1, 1, 0.18)
+
+      HoverHandler {
+        id: popupHover
+        onHoveredChanged: {
+          if (hovered) popupCloseTimer.stop()
+          else popupCloseTimer.restart()
+        }
+      }
+
+      Column {
+        anchors.fill: parent
+        anchors.margins: 6
+
+        Repeater {
+          model: root.runningWindows.slice(0, 8)
+
+          Rectangle {
+            required property var modelData
+            width: parent.width
+            height: 38
+            radius: 7
+            color: rowHover.hovered ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+
+            Text {
+              anchors.fill: parent
+              anchors.leftMargin: 10
+              anchors.rightMargin: 10
+              verticalAlignment: Text.AlignVCenter
+              text: modelData.title || root.entry?.name || root.desktopId
+              color: "#f5f5f5"
+              font.pixelSize: 13
+              elide: Text.ElideRight
+            }
+
+            HoverHandler {
+              id: rowHover
+              cursorShape: Qt.PointingHandCursor
+            }
+
+            TapHandler {
+              acceptedButtons: Qt.LeftButton
+              onTapped: {
+                modelData.activate()
+                root.instancePopupRequested = false
+                root.instanceHoverLeft(root.desktopId)
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   TapHandler {
@@ -234,6 +360,7 @@ Item {
     id: dragHandler
 
     target: null
+    enabled: root.pinnedItem
     acceptedButtons: Qt.LeftButton
     xAxis.enabled: !root.vertical
     yAxis.enabled: root.vertical
@@ -257,6 +384,7 @@ Item {
     position: root.position
     canClose: root.runningToplevel !== null
     autoHide: root.autoHide
+    pinnedItem: root.pinnedItem
     onVisibleChanged: root.contextMenuVisibilityChanged(visible)
     onOpenNewWindow: root.launch()
     onCloseWindow: root.closeRunning()
